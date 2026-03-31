@@ -1,0 +1,9 @@
+{
+  "name": "@self-hosted/shared-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p ../../tsconfig.base.json --noEmit"
+  }
+}

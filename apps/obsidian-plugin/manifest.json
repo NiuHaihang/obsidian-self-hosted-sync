@@ -1,0 +1,9 @@
+{
+  "id": "self-hosted-sync",
+  "name": "Self Hosted Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Self-hosted merge sync for Obsidian.",
+  "author": "self-hosted-sync",
+  "isDesktopOnly": true
+}

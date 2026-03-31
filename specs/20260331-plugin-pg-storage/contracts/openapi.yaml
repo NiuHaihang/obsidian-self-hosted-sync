@@ -1,0 +1,459 @@
+openapi: 3.0.3
+info:
+  title: PostgreSQL-backed Sync Service API
+  version: 0.1.0
+  description: >-
+    Contract for sync service with PostgreSQL persistence, transaction safety,
+    and readiness checks.
+
+servers:
+  - url: http://localhost:8787
+
+tags:
+  - name: health
+  - name: clients
+  - name: sync
+  - name: conflicts
+  - name: admin
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness check
+      operationId: getHealthz
+      responses:
+        '200':
+          description: process alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Readiness check with PostgreSQL dependency
+      operationId: getReadyz
+      responses:
+        '200':
+          description: service ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/admin/migrations/status:
+    get:
+      tags: [admin]
+      summary: Query migration and schema status
+      operationId: getMigrationStatus
+      responses:
+        '200':
+          description: migration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationStatusResponse'
+
+  /v1/spaces/{spaceId}/clients:
+    post:
+      tags: [clients]
+      summary: Register client device and issue tokens
+      operationId: registerClient
+      parameters:
+        - $ref: '#/components/parameters/spaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterClientRequest'
+      responses:
+        '201':
+          description: client registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterClientResponse'
+        '401':
+          $ref: '#/components/responses/AuthFailed'
+
+  /v1/spaces/{spaceId}/changes:
+    get:
+      tags: [sync]
+      summary: Pull incremental changes
+      operationId: pullChanges
+      parameters:
+        - $ref: '#/components/parameters/spaceId'
+        - in: query
+          name: from_version
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: pulled changes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PullChangesResponse'
+        '401':
+          $ref: '#/components/responses/AuthFailed'
+        '409':
+          $ref: '#/components/responses/VersionTooOld'
+
+    post:
+      tags: [sync]
+      summary: Push local changes with transactional merge
+      operationId: pushChanges
+      parameters:
+        - $ref: '#/components/parameters/spaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushChangesRequest'
+      responses:
+        '200':
+          description: push accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushChangesResponse'
+        '401':
+          $ref: '#/components/responses/AuthFailed'
+        '409':
+          $ref: '#/components/responses/MergeConflict'
+        '412':
+          $ref: '#/components/responses/ExpectedHeadMismatch'
+        '422':
+          $ref: '#/components/responses/InvalidChangeset'
+
+  /v1/spaces/{spaceId}/conflicts/{conflictSetId}:
+    get:
+      tags: [conflicts]
+      summary: Query conflict set
+      operationId: getConflictSet
+      parameters:
+        - $ref: '#/components/parameters/spaceId'
+        - $ref: '#/components/parameters/conflictSetId'
+      responses:
+        '200':
+          description: conflict detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictSetResponse'
+        '404':
+          description: conflict set not found
+
+  /v1/spaces/{spaceId}/conflicts/{conflictSetId}/resolutions:
+    post:
+      tags: [conflicts]
+      summary: Resolve conflict set and persist merged result
+      operationId: resolveConflictSet
+      parameters:
+        - $ref: '#/components/parameters/spaceId'
+        - $ref: '#/components/parameters/conflictSetId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveConflictsRequest'
+      responses:
+        '200':
+          description: conflict resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveConflictsResponse'
+        '412':
+          $ref: '#/components/responses/ExpectedHeadMismatch'
+
+components:
+  parameters:
+    spaceId:
+      in: path
+      name: spaceId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    conflictSetId:
+      in: path
+      name: conflictSetId
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    AuthFailed:
+      description: authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    VersionTooOld:
+      description: base version too old
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    MergeConflict:
+      description: merge conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ExpectedHeadMismatch:
+      description: expected head mismatch
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InvalidChangeset:
+      description: invalid changeset
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ReadinessResponse:
+      type: object
+      required: [status, db]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        db:
+          type: string
+          enum: [up, down]
+        migration_version:
+          type: string
+
+    MigrationStatusResponse:
+      type: object
+      required: [current_version, pending_count, db_connected]
+      properties:
+        current_version:
+          type: string
+        pending_count:
+          type: integer
+        db_connected:
+          type: boolean
+
+    RegisterClientRequest:
+      type: object
+      required: [device_id, client_name]
+      properties:
+        device_id:
+          type: string
+        client_name:
+          type: string
+
+    RegisterClientResponse:
+      type: object
+      required: [client_id, access_token, refresh_token, server_head]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        server_head:
+          type: integer
+          format: int64
+        snapshot_required:
+          type: boolean
+
+    ChangeOperation:
+      type: object
+      required: [op_type, path]
+      properties:
+        op_type:
+          type: string
+          enum: [upsert, delete, rename]
+        path:
+          type: string
+        new_path:
+          type: string
+        content_b64:
+          type: string
+
+    PullChangesResponse:
+      type: object
+      required: [head_version, changes, has_more]
+      properties:
+        head_version:
+          type: integer
+          format: int64
+        changes:
+          type: array
+          items:
+            type: object
+            required: [version, author_client_id, ops, ts]
+            properties:
+              version:
+                type: integer
+                format: int64
+              author_client_id:
+                type: string
+                format: uuid
+              ts:
+                type: string
+                format: date-time
+              ops:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChangeOperation'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+
+    PushChangesRequest:
+      type: object
+      required: [client_id, idempotency_key, base_version, expected_head, ops]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+        base_version:
+          type: integer
+          format: int64
+        expected_head:
+          type: integer
+          format: int64
+        ops:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ChangeOperation'
+
+    PushChangesResponse:
+      type: object
+      required: [applied, new_head_version, merge_result]
+      properties:
+        applied:
+          type: boolean
+        new_head_version:
+          type: integer
+          format: int64
+        merge_result:
+          type: string
+          enum: [fast_forward, merged, conflict]
+        conflict_set_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    ConflictSetResponse:
+      type: object
+      required: [conflict_set_id, status, base_version, head_version, items]
+      properties:
+        conflict_set_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [open, resolved]
+        base_version:
+          type: integer
+          format: int64
+        head_version:
+          type: integer
+          format: int64
+        items:
+          type: array
+          items:
+            type: object
+            required: [path, conflict_type]
+            properties:
+              path:
+                type: string
+              conflict_type:
+                type: string
+
+    ResolveConflictsRequest:
+      type: object
+      required: [expected_head, resolutions]
+      properties:
+        expected_head:
+          type: integer
+          format: int64
+        resolutions:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [path, strategy]
+            properties:
+              path:
+                type: string
+              strategy:
+                type: string
+                enum: [ours, theirs, manual]
+              content_b64:
+                type: string
+
+    ResolveConflictsResponse:
+      type: object
+      required: [resolved, new_head_version]
+      properties:
+        resolved:
+          type: boolean
+        new_head_version:
+          type: integer
+          format: int64
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: object
+              additionalProperties: true
+            trace_id:
+              type: string

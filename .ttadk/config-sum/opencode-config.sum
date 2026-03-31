@@ -1,0 +1,23 @@
+{
+  "ai_tool": "opencode",
+  "ttadk_version": "0.3.12",
+  "created_date": "2026-03-31",
+  "preferred_language": "zh",
+  "preset": "ttadk/common",
+  "plugins": [
+    {
+      "name": "ttadk/core",
+      "git_repo": "git@code.byted.org:tiktok/ttadk_plugin_market.git",
+      "branch": "master",
+      "commit": "a40228834a8be4fb9eca9a2a1787117ee1176fb7",
+      "updated_at": "2026-03-31T03:06:10.243Z"
+    },
+    {
+      "name": "ttadk/common-kit",
+      "git_repo": "git@code.byted.org:tiktok/ttadk_plugin_market.git",
+      "branch": "master",
+      "commit": "55310d0bde9da1a5454086acc49292393ba1c37c",
+      "updated_at": "2026-03-31T03:06:10.248Z"
+    }
+  ]
+}

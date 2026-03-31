@@ -1,0 +1,35 @@
+{
+  "name": "self-hosted-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.base.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:pg": "vitest run --config vitest.config.ts \"apps/sync-server/tests/**/*.pg.*.test.ts\"",
+    "db:migrate": "tsx apps/sync-server/src/repository/migrations/runner.ts",
+    "start:server": "tsx apps/sync-server/src/index.ts",
+    "plugin:install": "bash scripts/install-obsidian-plugin.sh",
+    "lint": "echo \"lint config ready\""
+  },
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "pino": "^9.3.2"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.10",
+    "@testcontainers/postgresql": "^10.13.2",
+    "testcontainers": "^10.13.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
