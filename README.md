@@ -1,6 +1,6 @@
 # Self-Hosted Sync for Obsidian
 
-一个用于 Obsidian 的自托管同步 MVP，目标是提供“类 Git merge”的多客户端同步能力，
+一个用于 Obsidian 的自托管同步插件，目标是提供“类 Git merge”的多客户端同步能力，
 避免因客户端版本不一致导致的误删。
 
 ## 核心能力
