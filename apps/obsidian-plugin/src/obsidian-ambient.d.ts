@@ -22,6 +22,7 @@ declare module "obsidian" {
   export class Plugin {
     app: App;
     addCommand(command: Command): void;
+    addRibbonIcon(icon: string, title: string, callback: () => void | Promise<void>): HTMLElement;
     addSettingTab(settingTab: PluginSettingTab): void;
     loadData(): Promise<unknown>;
     saveData(data: unknown): Promise<void>;

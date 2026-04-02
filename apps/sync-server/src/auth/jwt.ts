@@ -19,7 +19,16 @@ export function signRefreshToken(payload: AccessPayload, secret: string, expires
 }
 
 export function verifyAccessToken(token: string, secret: string): AccessPayload {
-  const decoded = jwt.verify(token, secret);
+  let decoded: string | jwt.JwtPayload;
+  try {
+    decoded = jwt.verify(token, secret);
+  } catch (error) {
+    const message = error instanceof Error && error.name === "TokenExpiredError"
+      ? "Access token expired"
+      : "Invalid access token";
+    throw new AppError(401, ERROR_CODES.AUTH_FAILED, message, false);
+  }
+
   if (typeof decoded === "string") {
     throw new AppError(401, ERROR_CODES.AUTH_FAILED, "Invalid token payload");
   }

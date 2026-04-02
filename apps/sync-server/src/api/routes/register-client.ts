@@ -18,24 +18,27 @@ export async function registerClientRoutes(app: FastifyInstance): Promise<void> 
     ) => {
       const { spaceId } = request.params;
       const body = request.body;
-      const clientId = app.syncContext.repository.registerClient(spaceId, body.device_id || randomUUID());
+      const clientId = await app.syncContext.repository.registerClient(spaceId, body.device_id || randomUUID());
       const sid = randomUUID();
+      const accessExpiresIn = process.env.SYNC_ACCESS_TOKEN_EXPIRES_IN ?? "7d";
+      const refreshExpiresIn = process.env.SYNC_REFRESH_TOKEN_EXPIRES_IN ?? "30d";
 
       const accessToken = signAccessToken(
         { sub: spaceId, did: clientId, sid },
-        app.syncContext.jwtSecret
+        app.syncContext.jwtSecret,
+        accessExpiresIn
       );
       const refreshToken = signRefreshToken(
         { sub: spaceId, did: clientId, sid },
         app.syncContext.jwtSecret,
-        "7d"
+        refreshExpiresIn
       );
 
       return reply.code(201).send({
         client_id: clientId,
         access_token: accessToken,
         refresh_token: refreshToken,
-        server_head: app.syncContext.repository.getHeadVersion(spaceId),
+        server_head: await app.syncContext.repository.getHeadVersion(spaceId),
         snapshot_required: body.last_known_version === undefined
       });
     }

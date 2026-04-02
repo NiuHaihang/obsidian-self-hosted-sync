@@ -57,15 +57,61 @@ var SettingsStore = class {
 var import_node_crypto = require("node:crypto");
 var import_node_path = require("node:path");
 var import_promises2 = require("node:fs/promises");
-var SETTINGS_FILE_NAME = ".obsidian-self-hosted-sync.json";
-function hashContent(content) {
-  return (0, import_node_crypto.createHash)("sha256").update(content).digest("hex");
-}
-function decodeContent(contentB64) {
+
+// src/sync/content-encoding.ts
+var BINARY_MARKER_PREFIX = "__SHS_BINARY_B64__:";
+function decodeTransportContent(contentB64, encoding) {
   if (!contentB64) {
     return "";
   }
+  if (encoding === "binary_base64") {
+    return `${BINARY_MARKER_PREFIX}${contentB64}`;
+  }
   return Buffer.from(contentB64, "base64").toString("utf8");
+}
+function encodeManifestContent(content) {
+  if (content.startsWith(BINARY_MARKER_PREFIX)) {
+    return {
+      content_b64: content.slice(BINARY_MARKER_PREFIX.length),
+      content_encoding: "binary_base64"
+    };
+  }
+  return {
+    content_b64: Buffer.from(content, "utf8").toString("base64"),
+    content_encoding: "utf8"
+  };
+}
+
+// src/storage/vault-file-adapter.ts
+var SETTINGS_FILE_NAME = ".obsidian-self-hosted-sync.json";
+var IGNORED_ROOT_ENTRIES = /* @__PURE__ */ new Set([".obsidian", ".git", ".trash"]);
+var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".bmp",
+  ".webp",
+  ".svg",
+  ".ico",
+  ".pdf",
+  ".zip",
+  ".7z",
+  ".tar",
+  ".gz",
+  ".mp3",
+  ".mp4",
+  ".mov",
+  ".avi",
+  ".webm",
+  ".wasm",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib"
+]);
+function hashContent(content) {
+  return (0, import_node_crypto.createHash)("sha256").update(content).digest("hex");
 }
 function normalizeRelativePath(input) {
   if (!input) {
@@ -81,16 +127,40 @@ function normalizeRelativePath(input) {
   }
   return normalized;
 }
+function isBinaryPath(relativePath) {
+  const normalized = relativePath.toLowerCase();
+  const slash = normalized.lastIndexOf("/");
+  const dot = normalized.lastIndexOf(".");
+  if (dot <= slash) {
+    return false;
+  }
+  return BINARY_EXTENSIONS.has(normalized.slice(dot));
+}
+function encodeBinaryContent(content) {
+  return `${BINARY_MARKER_PREFIX}${content.toString("base64")}`;
+}
+function decodeBinaryContent(content) {
+  return Buffer.from(content.slice(BINARY_MARKER_PREFIX.length), "base64");
+}
 var FileSystemVaultAdapter = class {
   constructor(vaultRoot) {
     __publicField(this, "vaultRootAbs");
+    __publicField(this, "vaultRootComparable");
     this.vaultRootAbs = (0, import_node_path.resolve)(vaultRoot);
+    this.vaultRootComparable = this.toComparablePath(this.vaultRootAbs);
+  }
+  toComparablePath(path) {
+    const resolved = (0, import_node_path.resolve)(path);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  }
+  isWithinVault(absolutePath) {
+    const rel = (0, import_node_path.relative)(this.vaultRootComparable, this.toComparablePath(absolutePath));
+    return rel === "" || rel !== ".." && !rel.startsWith(`..${import_node_path.sep}`);
   }
   resolveVaultPath(relativePath) {
     const normalized = normalizeRelativePath(relativePath);
     const absolute = (0, import_node_path.resolve)(this.vaultRootAbs, ...normalized.split("/"));
-    const rel = (0, import_node_path.relative)(this.vaultRootAbs, absolute);
-    if (rel === "" || rel === ".." || rel.startsWith(`..${import_node_path.sep}`)) {
+    if (!this.isWithinVault(absolute)) {
       throw new Error(`unsafe path: ${relativePath}`);
     }
     return absolute;
@@ -100,6 +170,9 @@ var FileSystemVaultAdapter = class {
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (!relativeDir && IGNORED_ROOT_ENTRIES.has(relativePath)) {
+        continue;
+      }
       if (!relativeDir && relativePath === SETTINGS_FILE_NAME) {
         continue;
       }
@@ -111,7 +184,7 @@ var FileSystemVaultAdapter = class {
       if (!entry.isFile()) {
         continue;
       }
-      const content = await (0, import_promises2.readFile)(absolutePath, "utf8");
+      const content = isBinaryPath(relativePath) ? encodeBinaryContent(await (0, import_promises2.readFile)(absolutePath)) : await (0, import_promises2.readFile)(absolutePath, "utf8");
       output.push({
         path: relativePath,
         content,
@@ -134,14 +207,25 @@ var FileSystemVaultAdapter = class {
     }
   }
   async pruneEmptyDirectories(fromAbsoluteDir) {
-    let current = fromAbsoluteDir;
-    while (current !== this.vaultRootAbs) {
-      const entries = await (0, import_promises2.readdir)(current);
-      if (entries.length > 0) {
+    let current = (0, import_node_path.resolve)(fromAbsoluteDir);
+    if (!this.isWithinVault(current)) {
+      return;
+    }
+    while (this.isWithinVault(current) && current !== this.vaultRootAbs) {
+      try {
+        const entries = await (0, import_promises2.readdir)(current);
+        if (entries.length > 0) {
+          return;
+        }
+        await (0, import_promises2.rm)(current, { recursive: true, force: true });
+      } catch {
         return;
       }
-      await (0, import_promises2.rm)(current, { recursive: true, force: true });
-      current = (0, import_node_path.dirname)(current);
+      const parent = (0, import_node_path.dirname)(current);
+      if (parent === current) {
+        return;
+      }
+      current = parent;
     }
   }
   async applyOperation(op) {
@@ -165,7 +249,12 @@ var FileSystemVaultAdapter = class {
     if (op.op_type === "upsert") {
       const absolutePath = this.resolveVaultPath(op.path);
       await (0, import_promises2.mkdir)((0, import_node_path.dirname)(absolutePath), { recursive: true });
-      await (0, import_promises2.writeFile)(absolutePath, decodeContent(op.content_b64), "utf8");
+      const content = decodeTransportContent(op.content_b64, op.content_encoding);
+      if (content.startsWith(BINARY_MARKER_PREFIX)) {
+        await (0, import_promises2.writeFile)(absolutePath, decodeBinaryContent(content));
+        return;
+      }
+      await (0, import_promises2.writeFile)(absolutePath, content, "utf8");
     }
   }
   async applyPulledChanges(pull) {
@@ -207,7 +296,8 @@ var SyncApiClient = class {
       }
     });
     if (!response.ok) {
-      throw new Error(`pull failed: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`pull failed: ${response.status} ${body}`);
     }
     return response.json();
   }
@@ -218,7 +308,8 @@ var SyncApiClient = class {
       }
     });
     if (!response.ok) {
-      throw new Error(`get conflict set failed: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`get conflict set failed: ${response.status} ${body}`);
     }
     return await response.json();
   }
@@ -250,7 +341,8 @@ var SyncApiClient = class {
       }
     );
     if (!response.ok) {
-      throw new Error(`resolve failed: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`resolve failed: ${response.status} ${body}`);
     }
     return await response.json();
   }
@@ -276,15 +368,6 @@ function calculateManifestDelta(base, current) {
   }
   return { upserts, deletes };
 }
-function encodeContent(content) {
-  return Buffer.from(content, "utf8").toString("base64");
-}
-function decodeContent2(contentB64) {
-  if (!contentB64) {
-    return "";
-  }
-  return Buffer.from(contentB64, "base64").toString("utf8");
-}
 function hashContent2(content) {
   return (0, import_node_crypto2.createHash)("sha256").update(content).digest("hex");
 }
@@ -308,7 +391,7 @@ function applyPulledChanges(baseManifest, pull) {
       }
       if (op.op_type === "upsert") {
         const existing = next.get(op.path);
-        const content = op.content_b64 ? decodeContent2(op.content_b64) : existing?.content ?? "";
+        const content = op.content_b64 ? decodeTransportContent(op.content_b64, op.content_encoding) : existing?.content ?? "";
         next.set(op.path, {
           path: op.path,
           content,
@@ -332,11 +415,15 @@ var SyncOrchestrator = class {
     const nextExpectedHead = Number(pull.head_version ?? expectedHead);
     const delta = calculateManifestDelta(baseManifest, currentManifest);
     const operations = [
-      ...delta.upserts.map((item) => ({
-        op_type: "upsert",
-        path: item.path,
-        content_b64: encodeContent(item.content)
-      })),
+      ...delta.upserts.map((item) => {
+        const encoded = encodeManifestContent(item.content);
+        return {
+          op_type: "upsert",
+          path: item.path,
+          content_b64: encoded.content_b64,
+          content_encoding: encoded.content_encoding
+        };
+      }),
       ...delta.deletes.map((path) => ({
         op_type: "delete",
         path
@@ -417,6 +504,12 @@ function formatConflictNotice(path, conflictPath) {
 }
 
 // src/main.ts
+function isConflictSetGoneError(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /(?:get conflict set failed|resolve failed):\s*(404|422)\b/.test(error.message);
+}
 var SelfHostedSyncPlugin = class {
   constructor(settingsStore = new SettingsStore(".obsidian-self-hosted-sync.json")) {
     __publicField(this, "settingsStore");
@@ -432,7 +525,12 @@ var SelfHostedSyncPlugin = class {
         collectManifest: () => adapter.collectManifest()
       });
     } catch (error) {
-      this.statusView.setError(error instanceof Error ? error.message : "unknown error");
+      const message = error instanceof Error ? error.message : "unknown error";
+      if (/\bpull failed:\s*401\b/.test(message) || /\bpush failed:\s*401\b/.test(message)) {
+        this.statusView.setError("\u8BA4\u8BC1\u5DF2\u8FC7\u671F\uFF08401\uFF09\uFF0C\u8BF7\u5230\u63D2\u4EF6\u8BBE\u7F6E\u9875\u91CD\u65B0\u70B9\u51FB\u201C\u6CE8\u518C\u201D\u5E76\u4FDD\u5B58\u540E\u91CD\u8BD5");
+        return;
+      }
+      this.statusView.setError(message);
     }
   }
   async runManualSync(currentManifest, hooks) {
@@ -498,7 +596,12 @@ var SelfHostedSyncPlugin = class {
       });
       this.statusView.setSuccess();
     } catch (error) {
-      this.statusView.setError(error instanceof Error ? error.message : "unknown error");
+      const message = error instanceof Error ? error.message : "unknown error";
+      if (/\bpull failed:\s*401\b/.test(message) || /\bpush failed:\s*401\b/.test(message)) {
+        this.statusView.setError("\u8BA4\u8BC1\u5DF2\u8FC7\u671F\uFF08401\uFF09\uFF0C\u8BF7\u5230\u63D2\u4EF6\u8BBE\u7F6E\u9875\u91CD\u65B0\u70B9\u51FB\u201C\u6CE8\u518C\u201D\u5E76\u4FDD\u5B58\u540E\u91CD\u8BD5");
+        return;
+      }
+      this.statusView.setError(message);
     }
   }
   async getPendingConflictPreview() {
@@ -507,22 +610,37 @@ var SelfHostedSyncPlugin = class {
     if (!pendingConflict) {
       return null;
     }
-    const apiClient = new SyncApiClient(settings.serverUrl, () => settings.accessToken);
-    const conflictSet = await apiClient.getConflictSet(settings.spaceId, pendingConflict.conflictSetId);
-    const byType = {};
-    for (const item of conflictSet.items) {
-      byType[item.conflict_type] = (byType[item.conflict_type] ?? 0) + 1;
-    }
-    return {
-      conflictSetId: pendingConflict.conflictSetId,
-      expectedHead: pendingConflict.expectedHead,
-      notices: conflictSet.items.map((item) => formatConflictNotice(item.path, item.conflict_path)),
-      items: conflictSet.items,
-      summary: {
-        total: conflictSet.items.length,
-        byType
+    try {
+      const apiClient = new SyncApiClient(settings.serverUrl, () => settings.accessToken);
+      const conflictSet = await apiClient.getConflictSet(settings.spaceId, pendingConflict.conflictSetId);
+      const byType = {};
+      for (const item of conflictSet.items) {
+        byType[item.conflict_type] = (byType[item.conflict_type] ?? 0) + 1;
       }
-    };
+      return {
+        conflictSetId: pendingConflict.conflictSetId,
+        expectedHead: pendingConflict.expectedHead,
+        notices: conflictSet.items.map((item) => formatConflictNotice(item.path, item.conflict_path)),
+        items: conflictSet.items,
+        summary: {
+          total: conflictSet.items.length,
+          byType
+        }
+      };
+    } catch (error) {
+      if (isConflictSetGoneError(error) && settings.syncState) {
+        await this.settingsStore.save({
+          ...settings,
+          syncState: {
+            ...settings.syncState,
+            pendingConflict: void 0
+          }
+        });
+        this.statusView.setError("\u5F85\u5904\u7406\u51B2\u7A81\u5728\u670D\u52A1\u7AEF\u5DF2\u5931\u6548\uFF0C\u5DF2\u6E05\u7406\u672C\u5730\u72B6\u6001\uFF0C\u8BF7\u91CD\u65B0\u540C\u6B65");
+        return null;
+      }
+      throw error;
+    }
   }
   async resolvePendingConflictByStrategyWithVault(vaultPath, strategy) {
     const adapter = new FileSystemVaultAdapter(vaultPath);
@@ -563,12 +681,14 @@ var SelfHostedSyncPlugin = class {
       return;
     }
     this.statusView.setSyncing();
+    let resolveHead = null;
     try {
       const apiClient = new SyncApiClient(settings.serverUrl, () => settings.accessToken);
       const resolveResult = await apiClient.resolveConflicts(settings.spaceId, pendingConflict.conflictSetId, {
         expected_head: pendingConflict.expectedHead,
         resolutions
       });
+      resolveHead = Number(resolveResult.new_head_version ?? pendingConflict.expectedHead);
       const pullRaw = await apiClient.pullChanges(settings.spaceId, syncState.baseVersion);
       const pull = pullRaw;
       await hooks.applyPulledChanges(pull);
@@ -585,7 +705,39 @@ var SelfHostedSyncPlugin = class {
       });
       this.statusView.setSuccess("\u51B2\u7A81\u5DF2\u89E3\u51B3\u5E76\u540C\u6B65\u5B8C\u6210");
     } catch (error) {
+      if (resolveHead !== null) {
+        await this.clearPendingConflictAfterServerResolve(settings, syncState, resolveHead, error);
+        return;
+      }
+      if (isConflictSetGoneError(error)) {
+        await this.settingsStore.save({
+          ...settings,
+          syncState: {
+            ...syncState,
+            pendingConflict: void 0
+          }
+        });
+        this.statusView.setError("\u51B2\u7A81\u96C6\u5728\u670D\u52A1\u7AEF\u5DF2\u5931\u6548\uFF0C\u5DF2\u6E05\u7406\u672C\u5730\u72B6\u6001\uFF0C\u8BF7\u91CD\u65B0\u540C\u6B65");
+        return;
+      }
       this.statusView.setError(error instanceof Error ? error.message : "unknown error");
+    }
+  }
+  async clearPendingConflictAfterServerResolve(settings, syncState, resolveHead, error) {
+    try {
+      await this.settingsStore.save({
+        ...settings,
+        syncState: {
+          ...syncState,
+          expectedHead: resolveHead,
+          pendingConflict: void 0
+        }
+      });
+      const suffix = error instanceof Error ? `\uFF1A${error.message}` : "";
+      this.statusView.setError(`\u670D\u52A1\u7AEF\u51B2\u7A81\u5DF2\u89E3\u51B3\uFF0C\u4F46\u672C\u5730\u66F4\u65B0\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u65B0\u540C\u6B65${suffix}`);
+    } catch (saveError) {
+      const saveSuffix = saveError instanceof Error ? `\uFF1B\u72B6\u6001\u4FDD\u5B58\u5931\u8D25\uFF1A${saveError.message}` : "";
+      this.statusView.setError(`\u670D\u52A1\u7AEF\u51B2\u7A81\u5DF2\u89E3\u51B3\uFF0C\u4F46\u672C\u5730\u72B6\u6001\u6E05\u7406\u5931\u8D25${saveSuffix}`);
     }
   }
   getStatus() {
@@ -655,12 +807,15 @@ function normalizeSettings(raw) {
 var ObsidianSettingsStore = class {
   constructor(plugin) {
     this.plugin = plugin;
+    __publicField(this, "saveChain", Promise.resolve());
   }
   async load() {
     return normalizeSettings(await this.plugin.loadData());
   }
   async save(next) {
-    await this.plugin.saveData(next);
+    const run = this.saveChain.then(() => this.plugin.saveData(next));
+    this.saveChain = run.then(() => void 0, () => void 0);
+    await run;
   }
 };
 var ObsidianSyncSettingTab = class extends import_obsidian.PluginSettingTab {
@@ -774,17 +929,14 @@ var SelfHostedSyncObsidianPlugin = class extends import_obsidian.Plugin {
     this.settingsStore = new ObsidianSettingsStore(this);
     this.syncCore = new SelfHostedSyncPlugin(this.settingsStore);
     this.addSettingTab(new ObsidianSyncSettingTab(this.app, this, this.settingsStore));
+    this.addRibbonIcon("refresh-cw", "Self Hosted Sync: Run manual sync", async () => {
+      await this.runManualSyncFromVault();
+    });
     this.addCommand({
       id: "self-hosted-sync-run-now",
       name: "Self Hosted Sync: Run manual sync",
       callback: async () => {
-        const vaultPath = this.getVaultPath();
-        if (!vaultPath) {
-          new import_obsidian.Notice("\u5F53\u524D Vault \u9002\u914D\u5668\u4E0D\u652F\u6301\u672C\u5730\u6587\u4EF6\u8DEF\u5F84\uFF0C\u4EC5\u684C\u9762\u6A21\u5F0F\u53EF\u7528");
-          return;
-        }
-        await this.syncCore.runManualSyncWithVault(vaultPath);
-        new import_obsidian.Notice(this.syncCore.getStatus().message);
+        await this.runManualSyncFromVault();
       }
     });
     this.addCommand({
@@ -835,5 +987,14 @@ var SelfHostedSyncObsidianPlugin = class extends import_obsidian.Plugin {
       return null;
     }
     return adapter.getBasePath();
+  }
+  async runManualSyncFromVault() {
+    const vaultPath = this.getVaultPath();
+    if (!vaultPath) {
+      new import_obsidian.Notice("\u5F53\u524D Vault \u9002\u914D\u5668\u4E0D\u652F\u6301\u672C\u5730\u6587\u4EF6\u8DEF\u5F84\uFF0C\u4EC5\u684C\u9762\u6A21\u5F0F\u53EF\u7528");
+      return;
+    }
+    await this.syncCore.runManualSyncWithVault(vaultPath);
+    new import_obsidian.Notice(this.syncCore.getStatus().message);
   }
 };

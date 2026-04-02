@@ -52,6 +52,7 @@ export interface PullResult {
 
 export class InMemorySyncRepository {
   private readonly spaces = new Map<string, SpaceState>();
+  private txChain: Promise<void> = Promise.resolve();
 
   private ensureSpace(spaceId: string): SpaceState {
     const existing = this.spaces.get(spaceId);
@@ -72,23 +73,23 @@ export class InMemorySyncRepository {
     return created;
   }
 
-  registerClient(spaceId: string, clientId?: string): string {
+  async registerClient(spaceId: string, clientId?: string): Promise<string> {
     const state = this.ensureSpace(spaceId);
     const resolved = clientId ?? randomUUID();
     state.clients.add(resolved);
     return resolved;
   }
 
-  getHeadVersion(spaceId: string): number {
+  async getHeadVersion(spaceId: string): Promise<number> {
     return this.ensureSpace(spaceId).headVersion;
   }
 
-  getSnapshot(spaceId: string, version: number): Record<string, string> | null {
+  async getSnapshot(spaceId: string, version: number): Promise<Record<string, string> | null> {
     const snapshot = this.ensureSpace(spaceId).snapshots.get(version);
     return snapshot ? { ...snapshot } : null;
   }
 
-  saveCommit(
+  async saveCommit(
     spaceId: string,
     authorClientId: string,
     snapshot: Record<string, string>,
@@ -96,7 +97,7 @@ export class InMemorySyncRepository {
     mergeMode: MergeResultType,
     idempotencyKey?: string,
     conflictSetId?: string
-  ): CommitResult {
+  ): Promise<CommitResult> {
     const state = this.ensureSpace(spaceId);
     const nextVersion = state.headVersion + 1;
     state.headVersion = nextVersion;
@@ -119,7 +120,7 @@ export class InMemorySyncRepository {
     return { version: nextVersion, mergeMode };
   }
 
-  pullChanges(spaceId: string, fromVersion: number, limit = 200, cursor?: string): PullResult {
+  async pullChanges(spaceId: string, fromVersion: number, limit = 200, cursor?: string): Promise<PullResult> {
     const state = this.ensureSpace(spaceId);
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     const candidates = state.changes.filter((change) => change.version > fromVersion);
@@ -133,7 +134,7 @@ export class InMemorySyncRepository {
     };
   }
 
-  saveConflictSet(spaceId: string, payload: Omit<ConflictSet, "conflict_set_id" | "status">): ConflictSet {
+  async saveConflictSet(spaceId: string, payload: Omit<ConflictSet, "conflict_set_id" | "status">): Promise<ConflictSet> {
     const state = this.ensureSpace(spaceId);
     const conflictSet: ConflictSet = {
       conflict_set_id: randomUUID(),
@@ -144,13 +145,13 @@ export class InMemorySyncRepository {
     return conflictSet;
   }
 
-  getConflictSet(spaceId: string, conflictSetId: string): ConflictSet | null {
+  async getConflictSet(spaceId: string, conflictSetId: string): Promise<ConflictSet | null> {
     const state = this.ensureSpace(spaceId);
     const set = state.conflictSets.get(conflictSetId);
     return set ? { ...set, items: [...set.items] } : null;
   }
 
-  resolveConflictSet(spaceId: string, conflictSetId: string): void {
+  async resolveConflictSet(spaceId: string, conflictSetId: string): Promise<void> {
     const state = this.ensureSpace(spaceId);
     const set = state.conflictSets.get(conflictSetId);
     if (!set) {
@@ -161,9 +162,24 @@ export class InMemorySyncRepository {
     state.conflictSets.set(conflictSetId, set);
   }
 
-  getIdempotentResult(spaceId: string, key: string):
+  async getIdempotentResult(spaceId: string, key: string): Promise<
     | { newHeadVersion: number; mergeResult: MergeResultType; conflictSetId?: string }
-    | undefined {
+    | undefined
+  > {
     return this.ensureSpace(spaceId).idempotency.get(key);
+  }
+
+  async withTransaction<T>(work: (tx: InMemorySyncRepository) => Promise<T>): Promise<T> {
+    const run = this.txChain.then(() => work(this));
+    this.txChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  async commit(): Promise<void> {
+    return;
+  }
+
+  async rollback(): Promise<void> {
+    return;
   }
 }

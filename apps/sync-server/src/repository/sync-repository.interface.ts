@@ -47,9 +47,9 @@ export interface IdempotentResult {
 }
 
 export interface SyncRepository {
-  registerClient(spaceId: string, clientId?: string): string;
-  getHeadVersion(spaceId: string): number;
-  getSnapshot(spaceId: string, version: number): Record<string, string> | null;
+  registerClient(spaceId: string, clientId?: string): Promise<string>;
+  getHeadVersion(spaceId: string): Promise<number>;
+  getSnapshot(spaceId: string, version: number): Promise<Record<string, string> | null>;
   saveCommit(
     spaceId: string,
     authorClientId: string,
@@ -58,12 +58,12 @@ export interface SyncRepository {
     mergeMode: MergeResultType,
     idempotencyKey?: string,
     conflictSetId?: string
-  ): CommitResult;
-  pullChanges(spaceId: string, fromVersion: number, limit?: number, cursor?: string): PullResult;
-  saveConflictSet(spaceId: string, payload: Omit<ConflictSet, "conflict_set_id" | "status">): ConflictSet;
-  getConflictSet(spaceId: string, conflictSetId: string): ConflictSet | null;
-  resolveConflictSet(spaceId: string, conflictSetId: string): void;
-  getIdempotentResult(spaceId: string, key: string): IdempotentResult | undefined;
+  ): Promise<CommitResult>;
+  pullChanges(spaceId: string, fromVersion: number, limit?: number, cursor?: string): Promise<PullResult>;
+  saveConflictSet(spaceId: string, payload: Omit<ConflictSet, "conflict_set_id" | "status">): Promise<ConflictSet>;
+  getConflictSet(spaceId: string, conflictSetId: string): Promise<ConflictSet | null>;
+  resolveConflictSet(spaceId: string, conflictSetId: string): Promise<void>;
+  getIdempotentResult(spaceId: string, key: string): Promise<IdempotentResult | undefined>;
 }
 
 export interface SyncRepositoryTx extends SyncRepository {

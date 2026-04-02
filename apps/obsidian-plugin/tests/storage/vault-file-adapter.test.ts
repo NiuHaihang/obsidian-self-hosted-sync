@@ -34,6 +34,19 @@ describe("file system vault adapter", () => {
     expect(manifest.every((item) => item.hash.length === 64)).toBe(true);
   });
 
+  it("ignores .obsidian root directory during collection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vault-adapter-"));
+    tempDirs.push(root);
+
+    await writeTextFile(join(root, "note.md"), "note");
+    await writeTextFile(join(root, ".obsidian", "plugins", "x", "main.js"), "plugin");
+
+    const adapter = new FileSystemVaultAdapter(root);
+    const manifest = await adapter.collectManifest();
+
+    expect(manifest.map((item) => item.path)).toEqual(["note.md"]);
+  });
+
   it("encodes binary attachments during manifest collection", async () => {
     const root = await mkdtemp(join(tmpdir(), "vault-adapter-"));
     tempDirs.push(root);

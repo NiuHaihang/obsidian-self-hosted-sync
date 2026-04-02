@@ -80,7 +80,7 @@ describe("sync commit service safety", () => {
     expect(secondPush.merge_result).toBe("conflict");
     expect(secondPush.conflict_set_id).toBeTruthy();
 
-    const conflictSet = repository.getConflictSet(spaceId, secondPush.conflict_set_id as string);
+    const conflictSet = await repository.getConflictSet(spaceId, secondPush.conflict_set_id as string);
     const conflictPath = conflictSet?.items[0]?.conflict_path;
 
     const resolved = await service.resolveConflicts(
@@ -93,7 +93,7 @@ describe("sync commit service safety", () => {
       "req-c"
     );
 
-    const snapshot = repository.getSnapshot(spaceId, resolved.new_head_version) ?? {};
+    const snapshot = (await repository.getSnapshot(spaceId, resolved.new_head_version)) ?? {};
     expect(snapshot).not.toHaveProperty("note.md");
     if (conflictPath) {
       expect(snapshot).not.toHaveProperty(conflictPath);
@@ -118,8 +118,8 @@ describe("sync commit service safety", () => {
     ]);
 
     expect(first.new_head_version).toBe(second.new_head_version);
-    expect(repository.getHeadVersion(spaceId)).toBe(1);
-    expect(repository.pullChanges(spaceId, 0).changes).toHaveLength(1);
+    expect(await repository.getHeadVersion(spaceId)).toBe(1);
+    expect((await repository.pullChanges(spaceId, 0)).changes).toHaveLength(1);
   });
 
   it("stores effective merged ops for conflict commits", async () => {
@@ -153,7 +153,7 @@ describe("sync commit service safety", () => {
 
     expect(secondPush.merge_result).toBe("conflict");
 
-    const pulled = repository.pullChanges(spaceId, 1).changes;
+    const pulled = (await repository.pullChanges(spaceId, 1)).changes;
     expect(pulled).toHaveLength(1);
 
     const ops = pulled[0]?.ops ?? [];
@@ -202,7 +202,7 @@ describe("sync commit service safety", () => {
       "req-res-c"
     );
 
-    const pulled = repository.pullChanges(spaceId, beforeResolveHead).changes;
+    const pulled = (await repository.pullChanges(spaceId, beforeResolveHead)).changes;
     expect(pulled).toHaveLength(1);
     expect(pulled[0]?.ops).toContainEqual({
       op_type: "upsert",
@@ -234,10 +234,10 @@ describe("sync commit service safety", () => {
       "req-binary"
     );
 
-    const snapshot = repository.getSnapshot(spaceId, pushed.new_head_version) ?? {};
+    const snapshot = (await repository.getSnapshot(spaceId, pushed.new_head_version)) ?? {};
     expect(snapshot["asset.png"]).toBe("__SHS_BINARY_B64__:AAEC");
 
-    const pulled = repository.pullChanges(spaceId, 0).changes;
+    const pulled = (await repository.pullChanges(spaceId, 0)).changes;
     expect(pulled).toHaveLength(1);
     expect(pulled[0]?.ops).toContainEqual({
       op_type: "upsert",

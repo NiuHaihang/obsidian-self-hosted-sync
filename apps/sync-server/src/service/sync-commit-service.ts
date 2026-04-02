@@ -112,7 +112,7 @@ export class SyncCommitService {
 
   async push(spaceId: string, payload: PushChangesRequest, requestId: string): Promise<PushChangesResponse> {
     return this.inTransaction(async (tx) => {
-      const cached = tx.getIdempotentResult(spaceId, payload.idempotency_key);
+      const cached = await tx.getIdempotentResult(spaceId, payload.idempotency_key);
       if (cached) {
         return {
           applied: true,
@@ -122,7 +122,7 @@ export class SyncCommitService {
         };
       }
 
-      const headBefore = tx.getHeadVersion(spaceId);
+      const headBefore = await tx.getHeadVersion(spaceId);
       if (payload.expected_head !== headBefore) {
         throw new AppError(
           412,
@@ -133,7 +133,7 @@ export class SyncCommitService {
         );
       }
 
-      const baseSnapshot = tx.getSnapshot(spaceId, payload.base_version);
+      const baseSnapshot = await tx.getSnapshot(spaceId, payload.base_version);
       if (!baseSnapshot) {
         throw new AppError(
           409,
@@ -144,7 +144,7 @@ export class SyncCommitService {
         );
       }
 
-      const remoteSnapshot = tx.getSnapshot(spaceId, headBefore) ?? {};
+      const remoteSnapshot = (await tx.getSnapshot(spaceId, headBefore)) ?? {};
       const localSnapshot = applyOps(baseSnapshot, payload.ops);
 
       const merged = mergeSnapshots(baseSnapshot, localSnapshot, remoteSnapshot, {
@@ -154,7 +154,7 @@ export class SyncCommitService {
 
       let conflictSetId: string | undefined;
       if (mergeResultHasConflict(merged.conflicts)) {
-        const conflictSet = tx.saveConflictSet(spaceId, {
+        const conflictSet = await tx.saveConflictSet(spaceId, {
           base_version: payload.base_version,
           head_version: headBefore,
           items: merged.conflicts
@@ -162,7 +162,7 @@ export class SyncCommitService {
         conflictSetId = conflictSet.conflict_set_id;
       }
 
-      const commit = tx.saveCommit(
+      const commit = await tx.saveCommit(
         spaceId,
         payload.client_id,
         merged.snapshot,
@@ -194,7 +194,7 @@ export class SyncCommitService {
     });
   }
 
-  pull(spaceId: string, fromVersion: number, limit = 200, cursor?: string): PullResult {
+  async pull(spaceId: string, fromVersion: number, limit = 200, cursor?: string): Promise<PullResult> {
     return this.repository.pullChanges(spaceId, fromVersion, limit, cursor);
   }
 
@@ -205,17 +205,17 @@ export class SyncCommitService {
     requestId: string
   ): Promise<{ resolved: boolean; new_head_version: number }> {
     return this.inTransaction(async (tx) => {
-      const headBefore = tx.getHeadVersion(spaceId);
+      const headBefore = await tx.getHeadVersion(spaceId);
       if (headBefore !== payload.expected_head) {
         throw new AppError(412, ERROR_CODES.EXPECTED_HEAD_MISMATCH, "Expected head does not match", true);
       }
 
-      const conflictSet = tx.getConflictSet(spaceId, conflictSetId);
+      const conflictSet = await tx.getConflictSet(spaceId, conflictSetId);
       if (!conflictSet) {
         throw new AppError(422, ERROR_CODES.INVALID_CHANGESET, "Conflict set not found");
       }
 
-      const headSnapshot = tx.getSnapshot(spaceId, headBefore) ?? {};
+      const headSnapshot = (await tx.getSnapshot(spaceId, headBefore)) ?? {};
       const current = { ...headSnapshot };
       const resolutionMap = new Map(payload.resolutions.map((item) => [item.path, item]));
 
@@ -259,8 +259,8 @@ export class SyncCommitService {
       }
 
       const resolutionOps = buildSnapshotOps(headSnapshot, current);
-      const commit = tx.saveCommit(spaceId, "resolver", current, resolutionOps, "merged");
-      tx.resolveConflictSet(spaceId, conflictSetId);
+      const commit = await tx.saveCommit(spaceId, "resolver", current, resolutionOps, "merged");
+      await tx.resolveConflictSet(spaceId, conflictSetId);
       await this.auditService.log({
         request_id: requestId,
         action: "resolve_conflicts",

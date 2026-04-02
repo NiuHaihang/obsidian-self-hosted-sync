@@ -62,7 +62,9 @@ cp apps/obsidian-plugin/dist/manifest.json "<YOUR_VAULT>/.obsidian/plugins/self-
    - 已有凭据则填写 `Access Token` 和 `Client ID`
 3. 若没有凭据：填写 `Register Device ID` 和 `Register Client Name`，点击 `注册`。
 4. 点击 `保存`，再点击 `测试连接`。
-5. 在命令面板运行 `Self Hosted Sync: Run manual sync`。
+5. 触发同步有两种方式：
+   - 左侧侧边栏点击刷新图标（Self Hosted Sync）
+   - 命令面板运行 `Self Hosted Sync: Run manual sync`
 6. 若出现冲突，先执行 `Self Hosted Sync: Show pending conflicts` 查看数量，再选择：
    - `Self Hosted Sync: Resolve all conflicts (ours)`
    - `Self Hosted Sync: Resolve all conflicts (theirs)`

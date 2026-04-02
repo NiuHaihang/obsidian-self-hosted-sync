@@ -86,7 +86,16 @@ npm run plugin:install -- "<YOUR_VAULT_PATH>"
 - 点击 `注册`
 - 成功后回到设置页点击 `保存`（可再点一次 `测试连接`）
 
-5. 命令面板可用命令：
+如果注册请求报 CORS 或预检失败，请确认服务端环境变量包含：
+
+- `SYNC_CORS_ORIGIN=*`
+- `SYNC_CORS_METHODS=GET,POST,OPTIONS`
+- `SYNC_CORS_HEADERS=Content-Type, Authorization`
+
+5. 触发同步与冲突处理：
+
+- 左侧侧边栏提供 `Self Hosted Sync` 刷新图标，点击即可手动同步
+- 命令面板可用命令：
 
 - `Self Hosted Sync: Run manual sync`
 - `Self Hosted Sync: Show pending conflicts`
@@ -142,8 +151,9 @@ npm run test:pg
 
 ## 说明
 
-- 当前服务端仓储默认是内存实现（用于 MVP 验证流程）。
-- 已补充 PostgreSQL 集成方案与验证链路，建议在发布前至少执行一次 `test:pg` 与 smoke。
+- 服务端已支持 PostgreSQL 持久化（`sync_commit` / `file_operation` / `sync_snapshot` / `sync_conflict_set` / `sync_idempotency`）。
+- 若设置 `SYNC_STORAGE_BACKEND=postgres` 且 `SYNC_ALLOW_DEGRADED_POSTGRES=1`，当数据库不可用时会降级为内存模式（仅用于开发排障，不建议生产开启）。
+- 建议在发布前至少执行一次 `test:pg` 与 smoke，并确认 `readyz` 为 `ready`。
 
 更多细节见：
 

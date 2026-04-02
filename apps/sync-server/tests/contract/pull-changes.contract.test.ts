@@ -32,4 +32,21 @@ describe("pull changes contract", () => {
     expect(Array.isArray(payload.changes)).toBe(true);
     expect(payload).toHaveProperty("has_more");
   });
+
+  it("returns 401 when access token is expired", async () => {
+    const app = await createTestServer();
+    servers.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/spaces/space-pull/changes?from_version=0",
+      headers: {
+        authorization: "Bearer expired.token.value"
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    const payload = response.json();
+    expect(payload.error.code).toBe("AUTH_FAILED");
+  });
 });

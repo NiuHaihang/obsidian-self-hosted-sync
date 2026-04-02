@@ -548,4 +548,27 @@ describe("plugin sync state persistence", () => {
       undefined
     );
   });
+
+  it("shows actionable message when auth is expired", async () => {
+    vi.spyOn(SettingsStore.prototype, "load").mockResolvedValue({
+      serverUrl: "http://localhost:8787",
+      spaceId: "space-auth",
+      clientId: "client-auth",
+      accessToken: "token-auth",
+      syncState: {
+        baseVersion: 0,
+        expectedHead: 0,
+        baseManifest: []
+      }
+    });
+    vi.spyOn(SyncOrchestrator.prototype, "sync").mockRejectedValue(
+      new Error("pull failed: 401 {\"error\":{\"code\":\"AUTH_FAILED\"}}")
+    );
+
+    const plugin = new SelfHostedSyncPlugin();
+    await plugin.runManualSync([]);
+
+    expect(plugin.getStatus().state).toBe("error");
+    expect(plugin.getStatus().message).toContain("认证已过期");
+  });
 });

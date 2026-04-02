@@ -188,19 +188,15 @@ export default class SelfHostedSyncObsidianPlugin extends Plugin {
     this.syncCore = new SelfHostedSyncPlugin(this.settingsStore);
 
     this.addSettingTab(new ObsidianSyncSettingTab(this.app, this, this.settingsStore));
+    this.addRibbonIcon("refresh-cw", "Self Hosted Sync: Run manual sync", async () => {
+      await this.runManualSyncFromVault();
+    });
 
     this.addCommand({
       id: "self-hosted-sync-run-now",
       name: "Self Hosted Sync: Run manual sync",
       callback: async () => {
-        const vaultPath = this.getVaultPath();
-        if (!vaultPath) {
-          new Notice("当前 Vault 适配器不支持本地文件路径，仅桌面模式可用");
-          return;
-        }
-
-        await this.syncCore.runManualSyncWithVault(vaultPath);
-        new Notice(this.syncCore.getStatus().message);
+        await this.runManualSyncFromVault();
       }
     });
 
@@ -260,5 +256,16 @@ export default class SelfHostedSyncObsidianPlugin extends Plugin {
       return null;
     }
     return adapter.getBasePath();
+  }
+
+  private async runManualSyncFromVault(): Promise<void> {
+    const vaultPath = this.getVaultPath();
+    if (!vaultPath) {
+      new Notice("当前 Vault 适配器不支持本地文件路径，仅桌面模式可用");
+      return;
+    }
+
+    await this.syncCore.runManualSyncWithVault(vaultPath);
+    new Notice(this.syncCore.getStatus().message);
   }
 }

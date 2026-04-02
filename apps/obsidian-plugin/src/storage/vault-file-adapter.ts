@@ -5,6 +5,7 @@ import type { FileManifest, PullOperation, PullResponse } from "../sync/sync-orc
 import { BINARY_MARKER_PREFIX, decodeTransportContent } from "../sync/content-encoding.js";
 
 const SETTINGS_FILE_NAME = ".obsidian-self-hosted-sync.json";
+const IGNORED_ROOT_ENTRIES = new Set([".obsidian", ".git", ".trash"]);
 const BINARY_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -106,6 +107,10 @@ export class FileSystemVaultAdapter {
 
     for (const entry of entries) {
       const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (!relativeDir && IGNORED_ROOT_ENTRIES.has(relativePath)) {
+        continue;
+      }
+
       if (!relativeDir && relativePath === SETTINGS_FILE_NAME) {
         continue;
       }

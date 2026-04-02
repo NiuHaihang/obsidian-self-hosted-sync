@@ -61,7 +61,13 @@ export class SelfHostedSyncPlugin {
         collectManifest: () => adapter.collectManifest()
       });
     } catch (error) {
-      this.statusView.setError(error instanceof Error ? error.message : "unknown error");
+      const message = error instanceof Error ? error.message : "unknown error";
+      if (/\bpull failed:\s*401\b/.test(message) || /\bpush failed:\s*401\b/.test(message)) {
+        this.statusView.setError("认证已过期（401），请到插件设置页重新点击“注册”并保存后重试");
+        return;
+      }
+
+      this.statusView.setError(message);
     }
   }
 
@@ -140,7 +146,13 @@ export class SelfHostedSyncPlugin {
 
       this.statusView.setSuccess();
     } catch (error) {
-      this.statusView.setError(error instanceof Error ? error.message : "unknown error");
+      const message = error instanceof Error ? error.message : "unknown error";
+      if (/\bpull failed:\s*401\b/.test(message) || /\bpush failed:\s*401\b/.test(message)) {
+        this.statusView.setError("认证已过期（401），请到插件设置页重新点击“注册”并保存后重试");
+        return;
+      }
+
+      this.statusView.setError(message);
     }
   }
 

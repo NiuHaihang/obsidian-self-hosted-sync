@@ -5,6 +5,7 @@ import Fastify, {
   type FastifyRequest
 } from "fastify";
 import { toErrorEnvelope, AppError } from "./error.js";
+import { ERROR_CODES } from "../../../../packages/shared-contracts/types/errors.js";
 import { registerRoutes } from "./routes/index.js";
 import type { SyncRepository } from "../repository/sync-repository.interface.js";
 import { SyncCommitService } from "../service/sync-commit-service.js";
@@ -34,8 +35,34 @@ export interface CreateServerOptions {
   jwtSecret?: string;
 }
 
+function parseCorsOrigins(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function resolveCorsOrigin(requestOrigin: string | undefined, configuredOrigins: string[]): string | null {
+  if (configuredOrigins.includes("*")) {
+    return "*";
+  }
+
+  if (!requestOrigin) {
+    return null;
+  }
+
+  return configuredOrigins.includes(requestOrigin) ? requestOrigin : null;
+}
+
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const configuredBodyLimit = Number.parseInt(process.env.SYNC_BODY_LIMIT_BYTES ?? "52428800", 10);
+  const bodyLimit = Number.isFinite(configuredBodyLimit) && configuredBodyLimit > 0
+    ? configuredBodyLimit
+    : 52428800;
+  const app = Fastify({ logger: true, bodyLimit });
+  const corsOrigins = parseCorsOrigins(process.env.SYNC_CORS_ORIGIN ?? "*");
+  const corsMethods = process.env.SYNC_CORS_METHODS ?? "GET,POST,OPTIONS";
+  const corsHeaders = process.env.SYNC_CORS_HEADERS ?? "Content-Type, Authorization";
 
   const repositoryContext = await createRepositoryContext();
   const repository = repositoryContext.repository;
@@ -54,9 +81,46 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     migrationStatusService: repositoryContext.migrationStatusService
   });
 
+  app.addHook("onClose", async () => {
+    if (repositoryContext.close) {
+      await repositoryContext.close();
+    }
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    const requestOrigin = typeof request.headers.origin === "string" ? request.headers.origin : undefined;
+    const allowedOrigin = resolveCorsOrigin(requestOrigin, corsOrigins);
+
+    if (allowedOrigin) {
+      reply.header("Access-Control-Allow-Origin", allowedOrigin);
+      if (allowedOrigin !== "*") {
+        reply.header("Vary", "Origin");
+      }
+    }
+
+    reply.header("Access-Control-Allow-Methods", corsMethods);
+    reply.header("Access-Control-Allow-Headers", corsHeaders);
+    reply.header("Access-Control-Max-Age", "86400");
+
+    if (request.method === "OPTIONS") {
+      void reply.code(204).send();
+      return;
+    }
+  });
+
   app.setErrorHandler((error: FastifyError | AppError, request: FastifyRequest, reply: FastifyReply) => {
-    const envelope = toErrorEnvelope(error, request.id);
-    const statusCode = error instanceof AppError ? error.statusCode : 500;
+    const statusCode = error instanceof AppError
+      ? error.statusCode
+      : (typeof error.statusCode === "number" ? error.statusCode : 500);
+
+    if (!(error instanceof AppError) && statusCode >= 500) {
+      app.log.error({ err: error, reqId: request.id }, "Unhandled server error");
+    }
+
+    const normalizedError = statusCode >= 400 && statusCode < 500 && !(error instanceof AppError)
+      ? new AppError(statusCode, ERROR_CODES.INVALID_CHANGESET, error.message || "Invalid request payload")
+      : error;
+    const envelope = toErrorEnvelope(normalizedError, request.id);
     reply.status(statusCode).send(envelope);
   });
 

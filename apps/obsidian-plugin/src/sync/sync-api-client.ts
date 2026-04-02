@@ -59,7 +59,8 @@ export class SyncApiClient {
       }
     });
     if (!response.ok) {
-      throw new Error(`pull failed: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`pull failed: ${response.status} ${body}`);
     }
     return response.json();
   }
@@ -72,7 +73,8 @@ export class SyncApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`get conflict set failed: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`get conflict set failed: ${response.status} ${body}`);
     }
 
     return (await response.json()) as ConflictSetResponse;
@@ -132,7 +134,8 @@ export class SyncApiClient {
     );
 
     if (!response.ok) {
-      throw new Error(`resolve failed: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`resolve failed: ${response.status} ${body}`);
     }
 
     return (await response.json()) as ResolveConflictsResponse;

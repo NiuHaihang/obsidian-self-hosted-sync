@@ -9,15 +9,15 @@
       "name": "ttadk/core",
       "git_repo": "git@code.byted.org:tiktok/ttadk_plugin_market.git",
       "branch": "master",
-      "commit": "a40228834a8be4fb9eca9a2a1787117ee1176fb7",
-      "updated_at": "2026-03-31T03:06:10.243Z"
+      "commit": "15970ec9c82a9a12ed33741dc33e704723e562a7",
+      "updated_at": "2026-04-01T09:29:39.363Z"
     },
     {
       "name": "ttadk/common-kit",
       "git_repo": "git@code.byted.org:tiktok/ttadk_plugin_market.git",
       "branch": "master",
       "commit": "55310d0bde9da1a5454086acc49292393ba1c37c",
-      "updated_at": "2026-03-31T03:06:10.248Z"
+      "updated_at": "2026-04-01T09:29:31.440Z"
     }
   ]
 }

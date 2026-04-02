@@ -67,7 +67,7 @@ Based on the user's selection:
 
 2. **Reference Setting**
    - Load tech stack references from plan.md's Technical Context section. Use these references for technical design decisions and architecture patterns.
-   - **Frontend Stack Reference**: Prioritize project runtime guidance files (for example `AGENTS.md` or equivalent); if unavailable or lacking the needed guidance, then refer to the project's existing architecture and current tech stack choices
+   - **Frontend Stack Reference**: Prioritize `CLAUDE.md`; if it is unavailable or lacks the needed guidance, then refer to the project's existing architecture and current tech stack choices
 
 ---
 
@@ -781,7 +781,7 @@ stateDiagram-v2
 - **Layer Compliance**: All component placements must follow the project's layer architecture
 - **Component Selection**: Prefer existing project components and the project's current UI component system; avoid introducing new component libraries unless necessary
 - **Formily for Forms**: Use Formily DSL for complex forms (refer to domain/src/plan-edit/)
-- **CSS Modules + Tailwind**: Prioritize styling conventions in project runtime guidance files (for example `AGENTS.md` or equivalent); if not available, follow the project's existing styling architecture and established patterns
+- **CSS Modules + Tailwind**: Prioritize styling conventions in `CLAUDE.md`; if not available, follow the project's existing styling architecture and established patterns
 - **i18n Required**: All user-facing text must use `t()` function
 
 ### Backend-Specific Principles

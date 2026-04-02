@@ -49,8 +49,8 @@ describe("non-destructive merge integration", () => {
       }
     });
 
-    const head = app.syncContext.repository.getHeadVersion(spaceId);
-    const snapshot = app.syncContext.repository.getSnapshot(spaceId, head);
+    const head = await app.syncContext.repository.getHeadVersion(spaceId);
+    const snapshot = await app.syncContext.repository.getSnapshot(spaceId, head);
     expect(snapshot).toBeTruthy();
     const keys = Object.keys(snapshot ?? {}).sort();
     expect(keys).toContain("abc.md");

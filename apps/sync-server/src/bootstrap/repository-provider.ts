@@ -11,6 +11,7 @@ export interface RepositoryContext {
   backend: "memory" | "postgres";
   dbReady: boolean;
   migrationStatusService: MigrationStatusService;
+  close?: () => Promise<void>;
 }
 
 async function listExpectedMigrationVersions(): Promise<string[]> {
@@ -32,19 +33,26 @@ export async function createRepositoryContext(): Promise<RepositoryContext> {
     const status = await migrationStatusService.getStatus(expected);
 
     if (!dbReady || !status.db_connected) {
+      const degraded = process.env.SYNC_ALLOW_DEGRADED_POSTGRES === "1";
       return {
-        repository: new PostgresSyncWriteRepository(),
+        repository: degraded ? new InMemorySyncRepository() : new PostgresSyncWriteRepository(pool),
         backend: "postgres",
         dbReady: false,
-        migrationStatusService
+        migrationStatusService,
+        close: async () => {
+          await pool.end();
+        }
       };
     }
 
     return {
-      repository: new PostgresSyncWriteRepository(),
+      repository: new PostgresSyncWriteRepository(pool),
       backend: "postgres",
       dbReady: true,
-      migrationStatusService
+      migrationStatusService,
+      close: async () => {
+        await pool.end();
+      }
     };
   }
 
@@ -52,6 +60,7 @@ export async function createRepositoryContext(): Promise<RepositoryContext> {
     repository: new InMemorySyncRepository(),
     backend: "memory",
     dbReady: true,
-    migrationStatusService: new MigrationStatusService(null)
+    migrationStatusService: new MigrationStatusService(null),
+    close: undefined
   };
 }

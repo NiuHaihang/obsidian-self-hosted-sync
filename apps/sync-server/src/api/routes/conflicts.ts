@@ -20,7 +20,7 @@ export async function registerConflictRoutes(app: FastifyInstance): Promise<void
         throw new AppError(503, ERROR_CODES.DB_NOT_READY, "PostgreSQL not ready", true);
       }
 
-      const set = app.syncContext.repository.getConflictSet(
+      const set = await app.syncContext.repository.getConflictSet(
         request.params.spaceId,
         request.params.conflictSetId
       );
