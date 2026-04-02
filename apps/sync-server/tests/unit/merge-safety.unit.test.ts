@@ -246,4 +246,38 @@ describe("sync commit service safety", () => {
       content_encoding: "binary_base64"
     });
   });
+
+  it("auto-treats null-byte utf8 payload as binary content", async () => {
+    const repository = new InMemorySyncRepository();
+    const service = new SyncCommitService(repository, new SyncAuditService());
+    const spaceId = "space-null-byte-fallback";
+
+    const pushed = await service.push(
+      spaceId,
+      {
+        client_id: "client-a",
+        idempotency_key: "null-fallback-1",
+        base_version: 0,
+        expected_head: 0,
+        ops: [{
+          op_type: "upsert",
+          path: "rawdata",
+          content_b64: "YQBi",
+          content_encoding: "utf8"
+        }]
+      },
+      "req-null-fallback"
+    );
+
+    const snapshot = (await repository.getSnapshot(spaceId, pushed.new_head_version)) ?? {};
+    expect(snapshot["rawdata"]).toBe("__SHS_BINARY_B64__:YQBi");
+
+    const pulled = (await repository.pullChanges(spaceId, 0)).changes;
+    expect(pulled[0]?.ops).toContainEqual({
+      op_type: "upsert",
+      path: "rawdata",
+      content_b64: "YQBi",
+      content_encoding: "binary_base64"
+    });
+  });
 });

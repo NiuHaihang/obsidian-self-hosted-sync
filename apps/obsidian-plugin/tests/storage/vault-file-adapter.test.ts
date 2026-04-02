@@ -47,6 +47,32 @@ describe("file system vault adapter", () => {
     expect(manifest.map((item) => item.path)).toEqual(["note.md"]);
   });
 
+  it("ignores os metadata files like .DS_Store", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vault-adapter-"));
+    tempDirs.push(root);
+
+    await writeTextFile(join(root, "note.md"), "note");
+    await writeFile(join(root, ".DS_Store"), Buffer.from([0x00, 0x01, 0x02]));
+
+    const adapter = new FileSystemVaultAdapter(root);
+    const manifest = await adapter.collectManifest();
+
+    expect(manifest.map((item) => item.path)).toEqual(["note.md"]);
+  });
+
+  it("encodes null-byte files as binary even without extension", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vault-adapter-"));
+    tempDirs.push(root);
+
+    await writeFile(join(root, "rawdata"), Buffer.from([0x61, 0x00, 0x62]));
+
+    const adapter = new FileSystemVaultAdapter(root);
+    const manifest = await adapter.collectManifest();
+    expect(manifest).toHaveLength(1);
+    expect(manifest[0]?.path).toBe("rawdata");
+    expect(manifest[0]?.content.startsWith(BINARY_MARKER_PREFIX)).toBe(true);
+  });
+
   it("encodes binary attachments during manifest collection", async () => {
     const root = await mkdtemp(join(tmpdir(), "vault-adapter-"));
     tempDirs.push(root);

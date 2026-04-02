@@ -85,6 +85,7 @@ function encodeManifestContent(content) {
 // src/storage/vault-file-adapter.ts
 var SETTINGS_FILE_NAME = ".obsidian-self-hosted-sync.json";
 var IGNORED_ROOT_ENTRIES = /* @__PURE__ */ new Set([".obsidian", ".git", ".trash"]);
+var IGNORED_FILE_NAMES = /* @__PURE__ */ new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
   ".png",
   ".jpg",
@@ -136,6 +137,9 @@ function isBinaryPath(relativePath) {
   }
   return BINARY_EXTENSIONS.has(normalized.slice(dot));
 }
+function hasNullByte(content) {
+  return content.includes(0);
+}
 function encodeBinaryContent(content) {
   return `${BINARY_MARKER_PREFIX}${content.toString("base64")}`;
 }
@@ -184,7 +188,11 @@ var FileSystemVaultAdapter = class {
       if (!entry.isFile()) {
         continue;
       }
-      const content = isBinaryPath(relativePath) ? encodeBinaryContent(await (0, import_promises2.readFile)(absolutePath)) : await (0, import_promises2.readFile)(absolutePath, "utf8");
+      if (IGNORED_FILE_NAMES.has(entry.name)) {
+        continue;
+      }
+      const raw = await (0, import_promises2.readFile)(absolutePath);
+      const content = isBinaryPath(relativePath) || hasNullByte(raw) ? encodeBinaryContent(raw) : raw.toString("utf8");
       output.push({
         path: relativePath,
         content,
@@ -819,9 +827,11 @@ var ObsidianSettingsStore = class {
   }
 };
 var ObsidianSyncSettingTab = class extends import_obsidian.PluginSettingTab {
-  constructor(app, plugin, settingsStore) {
+  constructor(app, plugin, settingsStore, syncCore, resolveVaultPath) {
     super(app, plugin);
     this.settingsStore = settingsStore;
+    this.syncCore = syncCore;
+    this.resolveVaultPath = resolveVaultPath;
     __publicField(this, "model");
     this.model = new SettingsTabModel(settingsStore);
   }
@@ -917,6 +927,179 @@ var ObsidianSyncSettingTab = class extends import_obsidian.PluginSettingTab {
         }
       });
     });
+    await this.renderConflictSection(container);
+  }
+  async renderConflictSection(container) {
+    const title = document.createElement("h3");
+    title.textContent = "\u51B2\u7A81\u5904\u7406";
+    container.appendChild(title);
+    const helper = document.createElement("p");
+    helper.textContent = "\u68C0\u6D4B\u5230\u51B2\u7A81\u540E\uFF0C\u53EF\u5728\u8FD9\u91CC\u67E5\u770B\u51B2\u7A81\u9879\u5E76\u9009\u62E9\u4FDD\u7559\u672C\u5730\uFF08ours\uFF09\u6216\u670D\u52A1\u7AEF\uFF08theirs\uFF09\u3002";
+    container.appendChild(helper);
+    const preview = await this.syncCore.getPendingConflictPreview();
+    if (!preview) {
+      const empty = document.createElement("p");
+      empty.textContent = "\u5F53\u524D\u6CA1\u6709\u5F85\u5904\u7406\u51B2\u7A81\u3002";
+      container.appendChild(empty);
+      return;
+    }
+    const summary = document.createElement("p");
+    const typeSummary = Object.entries(preview.summary.byType).map(([type, count]) => `${type}:${count}`).join(", ");
+    summary.textContent = `\u51B2\u7A81\u96C6 ${preview.conflictSetId}\uFF0C\u5171 ${preview.summary.total} \u9879${typeSummary ? `\uFF08${typeSummary}\uFF09` : ""}`;
+    container.appendChild(summary);
+    const list = document.createElement("div");
+    const drafts = /* @__PURE__ */ new Map();
+    for (const item of preview.items) {
+      const serverBinary = typeof item.server_content === "string" && item.server_content.startsWith(BINARY_MARKER_PREFIX);
+      const clientBinary = typeof item.client_content === "string" && item.client_content.startsWith(BINARY_MARKER_PREFIX);
+      const manualEditable = !serverBinary && !clientBinary;
+      const defaultManual = item.client_content ?? item.server_content ?? "";
+      drafts.set(item.path, {
+        strategy: "ours",
+        manualContent: defaultManual,
+        delete: false,
+        manualEditable
+      });
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.gap = "8px";
+      row.style.alignItems = "center";
+      row.style.marginBottom = "6px";
+      const label = document.createElement("span");
+      label.style.flex = "1";
+      label.textContent = `${item.path} (${item.conflict_type})`;
+      row.appendChild(label);
+      const select = document.createElement("select");
+      const ours = document.createElement("option");
+      ours.value = "ours";
+      ours.text = "\u4FDD\u7559\u672C\u5730";
+      const theirs = document.createElement("option");
+      theirs.value = "theirs";
+      theirs.text = "\u4FDD\u7559\u670D\u52A1\u7AEF";
+      const manual = document.createElement("option");
+      manual.value = "manual";
+      manual.text = "\u624B\u52A8\u7F16\u8F91";
+      if (!manualEditable) {
+        manual.disabled = true;
+      }
+      select.appendChild(ours);
+      select.appendChild(theirs);
+      select.appendChild(manual);
+      select.value = "ours";
+      const manualWrap = document.createElement("div");
+      manualWrap.style.display = "none";
+      manualWrap.style.margin = "8px 0 12px 0";
+      const manualText = document.createElement("textarea");
+      manualText.value = defaultManual;
+      manualText.rows = 5;
+      manualText.style.width = "100%";
+      manualText.style.fontFamily = "monospace";
+      manualText.oninput = () => {
+        const draft = drafts.get(item.path);
+        if (draft) {
+          draft.manualContent = manualText.value;
+        }
+      };
+      const deleteWrap = document.createElement("label");
+      deleteWrap.style.display = "block";
+      deleteWrap.style.marginBottom = "6px";
+      const deleteBox = document.createElement("input");
+      deleteBox.type = "checkbox";
+      deleteBox.onchange = () => {
+        const draft = drafts.get(item.path);
+        if (draft) {
+          draft.delete = deleteBox.checked;
+        }
+        manualText.disabled = deleteBox.checked;
+      };
+      deleteWrap.appendChild(deleteBox);
+      deleteWrap.append(" \u624B\u52A8\u89E3\u51B3\u4E3A\u5220\u9664\u8BE5\u6587\u4EF6");
+      if (!manualEditable) {
+        const hint = document.createElement("div");
+        hint.textContent = "\u8BE5\u51B2\u7A81\u6D89\u53CA\u4E8C\u8FDB\u5236\u5185\u5BB9\uFF0C\u6682\u4E0D\u652F\u6301\u624B\u52A8\u7F16\u8F91\uFF0C\u8BF7\u4F7F\u7528\u4FDD\u7559\u672C\u5730/\u670D\u52A1\u7AEF\u3002";
+        hint.style.opacity = "0.8";
+        manualWrap.appendChild(hint);
+      } else {
+        manualWrap.appendChild(deleteWrap);
+        manualWrap.appendChild(manualText);
+      }
+      select.onchange = () => {
+        const draft = drafts.get(item.path);
+        if (draft) {
+          draft.strategy = select.value === "theirs" ? "theirs" : select.value === "manual" ? "manual" : "ours";
+        }
+        manualWrap.style.display = select.value === "manual" ? "block" : "none";
+      };
+      row.appendChild(select);
+      list.appendChild(row);
+      list.appendChild(manualWrap);
+    }
+    container.appendChild(list);
+    new import_obsidian.Setting(container).setName("\u5FEB\u901F\u5904\u7406").setDesc("\u4E00\u952E\u6309\u7EDF\u4E00\u7B56\u7565\u89E3\u51B3\u5168\u90E8\u51B2\u7A81").addButton((button) => {
+      button.setButtonText("\u5168\u90E8\u4FDD\u7559\u672C\u5730").onClick(async () => {
+        await this.resolveAllConflicts("ours");
+      });
+    }).addButton((button) => {
+      button.setButtonText("\u5168\u90E8\u4FDD\u7559\u670D\u52A1\u7AEF").onClick(async () => {
+        await this.resolveAllConflicts("theirs");
+      });
+    }).addButton((button) => {
+      button.setButtonText("\u5237\u65B0\u51B2\u7A81").onClick(async () => {
+        await this.render();
+      });
+    });
+    new import_obsidian.Setting(container).setName("\u9010\u6761\u5904\u7406").setDesc("\u6309\u4E0A\u65B9\u6BCF\u4E00\u6761\u9009\u62E9\u7684\u7B56\u7565\u63D0\u4EA4\u51B2\u7A81\u89E3\u51B3").addButton((button) => {
+      button.setButtonText("\u63D0\u4EA4\u9010\u6761\u89E3\u51B3").setCta().onClick(async () => {
+        const vaultPath = this.resolveVaultPath();
+        if (!vaultPath) {
+          new import_obsidian.Notice("\u5F53\u524D Vault \u9002\u914D\u5668\u4E0D\u652F\u6301\u672C\u5730\u6587\u4EF6\u8DEF\u5F84\uFF0C\u4EC5\u684C\u9762\u6A21\u5F0F\u53EF\u7528");
+          return;
+        }
+        try {
+          const resolutions = preview.items.map((item) => {
+            const draft = drafts.get(item.path);
+            if (!draft || draft.strategy === "ours" || draft.strategy === "theirs") {
+              return {
+                path: item.path,
+                strategy: draft?.strategy ?? "ours"
+              };
+            }
+            if (draft.delete) {
+              return {
+                path: item.path,
+                strategy: "manual",
+                delete: true
+              };
+            }
+            return {
+              path: item.path,
+              strategy: "manual",
+              content_b64: Buffer.from(draft.manualContent, "utf8").toString("base64"),
+              content_encoding: "utf8"
+            };
+          });
+          await this.syncCore.resolvePendingConflictWithVault(vaultPath, resolutions);
+          new import_obsidian.Notice(this.syncCore.getStatus().message);
+          await this.render();
+        } catch (error) {
+          new import_obsidian.Notice(error instanceof Error ? error.message : "\u51B2\u7A81\u89E3\u51B3\u5931\u8D25");
+        }
+      });
+    });
+  }
+  async resolveAllConflicts(strategy) {
+    const vaultPath = this.resolveVaultPath();
+    if (!vaultPath) {
+      new import_obsidian.Notice("\u5F53\u524D Vault \u9002\u914D\u5668\u4E0D\u652F\u6301\u672C\u5730\u6587\u4EF6\u8DEF\u5F84\uFF0C\u4EC5\u684C\u9762\u6A21\u5F0F\u53EF\u7528");
+      return;
+    }
+    try {
+      await this.syncCore.resolvePendingConflictByStrategyWithVault(vaultPath, strategy);
+      new import_obsidian.Notice(this.syncCore.getStatus().message);
+      await this.render();
+    } catch (error) {
+      new import_obsidian.Notice(error instanceof Error ? error.message : "\u51B2\u7A81\u89E3\u51B3\u5931\u8D25");
+    }
   }
 };
 var SelfHostedSyncObsidianPlugin = class extends import_obsidian.Plugin {
@@ -928,7 +1111,9 @@ var SelfHostedSyncObsidianPlugin = class extends import_obsidian.Plugin {
   async onload() {
     this.settingsStore = new ObsidianSettingsStore(this);
     this.syncCore = new SelfHostedSyncPlugin(this.settingsStore);
-    this.addSettingTab(new ObsidianSyncSettingTab(this.app, this, this.settingsStore));
+    this.addSettingTab(
+      new ObsidianSyncSettingTab(this.app, this, this.settingsStore, this.syncCore, () => this.getVaultPath())
+    );
     this.addRibbonIcon("refresh-cw", "Self Hosted Sync: Run manual sync", async () => {
       await this.runManualSyncFromVault();
     });

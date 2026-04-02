@@ -65,6 +65,14 @@ cp apps/obsidian-plugin/dist/manifest.json "<YOUR_VAULT>/.obsidian/plugins/self-
 5. 触发同步有两种方式：
    - 左侧侧边栏点击刷新图标（Self Hosted Sync）
    - 命令面板运行 `Self Hosted Sync: Run manual sync`
-6. 若出现冲突，先执行 `Self Hosted Sync: Show pending conflicts` 查看数量，再选择：
-   - `Self Hosted Sync: Resolve all conflicts (ours)`
-   - `Self Hosted Sync: Resolve all conflicts (theirs)`
+6. 若出现冲突，进入插件设置页的“冲突处理”区：
+   - 可一键选择 `全部保留本地` / `全部保留服务端`
+   - 或按文件逐条选择策略后点击 `提交逐条解决`
+   - 逐条时支持 `手动编辑`（文本文件）与 `手动删除该文件`
+   - 提交后会自动拉取并落盘最新结果
+
+命令面板仍保留以下命令（可选）：
+
+- `Self Hosted Sync: Show pending conflicts`
+- `Self Hosted Sync: Resolve all conflicts (ours)`
+- `Self Hosted Sync: Resolve all conflicts (theirs)`

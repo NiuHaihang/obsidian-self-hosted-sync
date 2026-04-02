@@ -33,6 +33,13 @@ export function mapPgError(error: unknown): AppError {
     });
   }
 
+  if (pg.code === "22P05") {
+    return new AppError(400, ERROR_CODES.INVALID_CHANGESET, "Invalid text payload contains null byte", false, {
+      pg_code: pg.code,
+      detail
+    });
+  }
+
   return new AppError(500, ERROR_CODES.INTERNAL_ERROR, "PostgreSQL error", false, {
     pg_code: pg.code,
     detail

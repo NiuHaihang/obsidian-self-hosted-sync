@@ -4,6 +4,7 @@ import type { PluginSettings, PluginSettingsStore } from "./storage/settings-sto
 import { SettingsTabModel } from "./ui/settings-tab.js";
 import { registerClientAndPersist } from "./sync/register-client.js";
 import { SyncApiClient } from "./sync/sync-api-client.js";
+import { BINARY_MARKER_PREFIX } from "./sync/content-encoding.js";
 
 type VaultAdapterWithBasePath = {
   getBasePath?: () => string;
@@ -43,7 +44,13 @@ class ObsidianSettingsStore implements PluginSettingsStore {
 class ObsidianSyncSettingTab extends PluginSettingTab {
   private readonly model: SettingsTabModel;
 
-  constructor(app: Plugin["app"], plugin: Plugin, private readonly settingsStore: PluginSettingsStore) {
+  constructor(
+    app: Plugin["app"],
+    plugin: Plugin,
+    private readonly settingsStore: PluginSettingsStore,
+    private readonly syncCore: SelfHostedSyncPlugin,
+    private readonly resolveVaultPath: () => string | null
+  ) {
     super(app, plugin);
     this.model = new SettingsTabModel(settingsStore);
   }
@@ -176,6 +183,221 @@ class ObsidianSyncSettingTab extends PluginSettingTab {
           }
         });
       });
+
+    await this.renderConflictSection(container);
+  }
+
+  private async renderConflictSection(container: HTMLElement): Promise<void> {
+    const title = document.createElement("h3");
+    title.textContent = "冲突处理";
+    container.appendChild(title);
+
+    const helper = document.createElement("p");
+    helper.textContent = "检测到冲突后，可在这里查看冲突项并选择保留本地（ours）或服务端（theirs）。";
+    container.appendChild(helper);
+
+    const preview = await this.syncCore.getPendingConflictPreview();
+    if (!preview) {
+      const empty = document.createElement("p");
+      empty.textContent = "当前没有待处理冲突。";
+      container.appendChild(empty);
+      return;
+    }
+
+    const summary = document.createElement("p");
+    const typeSummary = Object.entries(preview.summary.byType)
+      .map(([type, count]) => `${type}:${count}`)
+      .join(", ");
+    summary.textContent = `冲突集 ${preview.conflictSetId}，共 ${preview.summary.total} 项${typeSummary ? `（${typeSummary}）` : ""}`;
+    container.appendChild(summary);
+
+    type Strategy = "ours" | "theirs" | "manual";
+    type Draft = {
+      strategy: Strategy;
+      manualContent: string;
+      delete: boolean;
+      manualEditable: boolean;
+    };
+
+    const list = document.createElement("div");
+    const drafts = new Map<string, Draft>();
+    for (const item of preview.items) {
+      const serverBinary = typeof item.server_content === "string" && item.server_content.startsWith(BINARY_MARKER_PREFIX);
+      const clientBinary = typeof item.client_content === "string" && item.client_content.startsWith(BINARY_MARKER_PREFIX);
+      const manualEditable = !serverBinary && !clientBinary;
+      const defaultManual = item.client_content ?? item.server_content ?? "";
+      drafts.set(item.path, {
+        strategy: "ours",
+        manualContent: defaultManual,
+        delete: false,
+        manualEditable
+      });
+
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.gap = "8px";
+      row.style.alignItems = "center";
+      row.style.marginBottom = "6px";
+
+      const label = document.createElement("span");
+      label.style.flex = "1";
+      label.textContent = `${item.path} (${item.conflict_type})`;
+      row.appendChild(label);
+
+      const select = document.createElement("select");
+      const ours = document.createElement("option");
+      ours.value = "ours";
+      ours.text = "保留本地";
+      const theirs = document.createElement("option");
+      theirs.value = "theirs";
+      theirs.text = "保留服务端";
+      const manual = document.createElement("option");
+      manual.value = "manual";
+      manual.text = "手动编辑";
+      if (!manualEditable) {
+        manual.disabled = true;
+      }
+      select.appendChild(ours);
+      select.appendChild(theirs);
+      select.appendChild(manual);
+      select.value = "ours";
+
+      const manualWrap = document.createElement("div");
+      manualWrap.style.display = "none";
+      manualWrap.style.margin = "8px 0 12px 0";
+
+      const manualText = document.createElement("textarea");
+      manualText.value = defaultManual;
+      manualText.rows = 5;
+      manualText.style.width = "100%";
+      manualText.style.fontFamily = "monospace";
+      manualText.oninput = () => {
+        const draft = drafts.get(item.path);
+        if (draft) {
+          draft.manualContent = manualText.value;
+        }
+      };
+
+      const deleteWrap = document.createElement("label");
+      deleteWrap.style.display = "block";
+      deleteWrap.style.marginBottom = "6px";
+      const deleteBox = document.createElement("input");
+      deleteBox.type = "checkbox";
+      deleteBox.onchange = () => {
+        const draft = drafts.get(item.path);
+        if (draft) {
+          draft.delete = deleteBox.checked;
+        }
+        manualText.disabled = deleteBox.checked;
+      };
+      deleteWrap.appendChild(deleteBox);
+      deleteWrap.append(" 手动解决为删除该文件");
+
+      if (!manualEditable) {
+        const hint = document.createElement("div");
+        hint.textContent = "该冲突涉及二进制内容，暂不支持手动编辑，请使用保留本地/服务端。";
+        hint.style.opacity = "0.8";
+        manualWrap.appendChild(hint);
+      } else {
+        manualWrap.appendChild(deleteWrap);
+        manualWrap.appendChild(manualText);
+      }
+
+      select.onchange = () => {
+        const draft = drafts.get(item.path);
+        if (draft) {
+          draft.strategy = select.value === "theirs"
+            ? "theirs"
+            : (select.value === "manual" ? "manual" : "ours");
+        }
+        manualWrap.style.display = select.value === "manual" ? "block" : "none";
+      };
+      row.appendChild(select);
+
+      list.appendChild(row);
+      list.appendChild(manualWrap);
+    }
+    container.appendChild(list);
+
+    new Setting(container)
+      .setName("快速处理")
+      .setDesc("一键按统一策略解决全部冲突")
+      .addButton((button) => {
+        button.setButtonText("全部保留本地").onClick(async () => {
+          await this.resolveAllConflicts("ours");
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText("全部保留服务端").onClick(async () => {
+          await this.resolveAllConflicts("theirs");
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText("刷新冲突").onClick(async () => {
+          await this.render();
+        });
+      });
+
+    new Setting(container)
+      .setName("逐条处理")
+      .setDesc("按上方每一条选择的策略提交冲突解决")
+      .addButton((button) => {
+        button.setButtonText("提交逐条解决").setCta().onClick(async () => {
+          const vaultPath = this.resolveVaultPath();
+          if (!vaultPath) {
+            new Notice("当前 Vault 适配器不支持本地文件路径，仅桌面模式可用");
+            return;
+          }
+
+          try {
+            const resolutions = preview.items.map((item) => {
+              const draft = drafts.get(item.path);
+              if (!draft || draft.strategy === "ours" || draft.strategy === "theirs") {
+                return {
+                  path: item.path,
+                  strategy: draft?.strategy ?? "ours"
+                };
+              }
+
+              if (draft.delete) {
+                return {
+                  path: item.path,
+                  strategy: "manual" as const,
+                  delete: true
+                };
+              }
+
+              return {
+                path: item.path,
+                strategy: "manual" as const,
+                content_b64: Buffer.from(draft.manualContent, "utf8").toString("base64"),
+                content_encoding: "utf8" as const
+              };
+            });
+            await this.syncCore.resolvePendingConflictWithVault(vaultPath, resolutions);
+            new Notice(this.syncCore.getStatus().message);
+            await this.render();
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : "冲突解决失败");
+          }
+        });
+      });
+  }
+
+  private async resolveAllConflicts(strategy: "ours" | "theirs"): Promise<void> {
+    const vaultPath = this.resolveVaultPath();
+    if (!vaultPath) {
+      new Notice("当前 Vault 适配器不支持本地文件路径，仅桌面模式可用");
+      return;
+    }
+
+    try {
+      await this.syncCore.resolvePendingConflictByStrategyWithVault(vaultPath, strategy);
+      new Notice(this.syncCore.getStatus().message);
+      await this.render();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "冲突解决失败");
+    }
   }
 }
 
@@ -187,7 +409,9 @@ export default class SelfHostedSyncObsidianPlugin extends Plugin {
     this.settingsStore = new ObsidianSettingsStore(this);
     this.syncCore = new SelfHostedSyncPlugin(this.settingsStore);
 
-    this.addSettingTab(new ObsidianSyncSettingTab(this.app, this, this.settingsStore));
+    this.addSettingTab(
+      new ObsidianSyncSettingTab(this.app, this, this.settingsStore, this.syncCore, () => this.getVaultPath())
+    );
     this.addRibbonIcon("refresh-cw", "Self Hosted Sync: Run manual sync", async () => {
       await this.runManualSyncFromVault();
     });

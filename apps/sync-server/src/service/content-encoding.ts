@@ -12,7 +12,12 @@ export function decodeTransportContent(contentB64?: string | null, encoding?: Co
     return `${BINARY_MARKER_PREFIX}${contentB64}`;
   }
 
-  return Buffer.from(contentB64, "base64").toString("utf8");
+  const decoded = Buffer.from(contentB64, "base64");
+  if (decoded.includes(0)) {
+    return `${BINARY_MARKER_PREFIX}${contentB64}`;
+  }
+
+  return decoded.toString("utf8");
 }
 
 export function encodeSnapshotValueForTransport(snapshotValue: string): {

@@ -95,6 +95,7 @@ npm run plugin:install -- "<YOUR_VAULT_PATH>"
 5. 触发同步与冲突处理：
 
 - 左侧侧边栏提供 `Self Hosted Sync` 刷新图标，点击即可手动同步
+- 出现冲突时，优先在插件设置页“冲突处理”区直接选择 `全部保留本地/服务端` 或逐条处理
 - 命令面板可用命令：
 
 - `Self Hosted Sync: Run manual sync`

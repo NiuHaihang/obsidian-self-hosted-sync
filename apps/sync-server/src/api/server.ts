@@ -113,8 +113,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ? error.statusCode
       : (typeof error.statusCode === "number" ? error.statusCode : 500);
 
-    if (!(error instanceof AppError) && statusCode >= 500) {
-      app.log.error({ err: error, reqId: request.id }, "Unhandled server error");
+    if (statusCode >= 500) {
+      app.log.error({ err: error, reqId: request.id }, "Server error response");
     }
 
     const normalizedError = statusCode >= 400 && statusCode < 500 && !(error instanceof AppError)

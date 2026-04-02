@@ -6,6 +6,7 @@ import { BINARY_MARKER_PREFIX, decodeTransportContent } from "../sync/content-en
 
 const SETTINGS_FILE_NAME = ".obsidian-self-hosted-sync.json";
 const IGNORED_ROOT_ENTRIES = new Set([".obsidian", ".git", ".trash"]);
+const IGNORED_FILE_NAMES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 const BINARY_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -63,6 +64,10 @@ function isBinaryPath(relativePath: string): boolean {
   }
 
   return BINARY_EXTENSIONS.has(normalized.slice(dot));
+}
+
+function hasNullByte(content: Buffer): boolean {
+  return content.includes(0);
 }
 
 function encodeBinaryContent(content: Buffer): string {
@@ -125,9 +130,14 @@ export class FileSystemVaultAdapter {
         continue;
       }
 
-      const content = isBinaryPath(relativePath)
-        ? encodeBinaryContent(await readFile(absolutePath))
-        : await readFile(absolutePath, "utf8");
+      if (IGNORED_FILE_NAMES.has(entry.name)) {
+        continue;
+      }
+
+      const raw = await readFile(absolutePath);
+      const content = isBinaryPath(relativePath) || hasNullByte(raw)
+        ? encodeBinaryContent(raw)
+        : raw.toString("utf8");
       output.push({
         path: relativePath,
         content,
