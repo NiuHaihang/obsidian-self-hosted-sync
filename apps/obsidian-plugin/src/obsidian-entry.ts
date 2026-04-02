@@ -219,6 +219,17 @@ class ObsidianSyncSettingTab extends PluginSettingTab {
       manualEditable: boolean;
     };
 
+    const toPreviewText = (value: string | null): string => {
+      if (value === null) {
+        return "(该侧结果为删除文件)";
+      }
+      if (value.startsWith(BINARY_MARKER_PREFIX)) {
+        const size = value.slice(BINARY_MARKER_PREFIX.length).length;
+        return `[二进制内容，base64长度 ${size}]`;
+      }
+      return value;
+    };
+
     const list = document.createElement("div");
     const drafts = new Map<string, Draft>();
     for (const item of preview.items) {
@@ -293,12 +304,97 @@ class ObsidianSyncSettingTab extends PluginSettingTab {
       deleteWrap.appendChild(deleteBox);
       deleteWrap.append(" 手动解决为删除该文件");
 
+      const previewWrap = document.createElement("div");
+      previewWrap.style.display = "grid";
+      previewWrap.style.gridTemplateColumns = "1fr 1fr";
+      previewWrap.style.gap = "8px";
+      previewWrap.style.marginBottom = "8px";
+
+      const serverPanel = document.createElement("div");
+      const serverTitle = document.createElement("div");
+      serverTitle.textContent = "服务端内容";
+      serverTitle.style.fontWeight = "600";
+      const serverText = document.createElement("textarea");
+      serverText.readOnly = true;
+      serverText.rows = 6;
+      serverText.style.width = "100%";
+      serverText.style.fontFamily = "monospace";
+      serverText.value = toPreviewText(item.server_content);
+      serverPanel.appendChild(serverTitle);
+      serverPanel.appendChild(serverText);
+
+      const localPanel = document.createElement("div");
+      const localTitle = document.createElement("div");
+      localTitle.textContent = "本地内容";
+      localTitle.style.fontWeight = "600";
+      const localText = document.createElement("textarea");
+      localText.readOnly = true;
+      localText.rows = 6;
+      localText.style.width = "100%";
+      localText.style.fontFamily = "monospace";
+      localText.value = toPreviewText(item.client_content);
+      localPanel.appendChild(localTitle);
+      localPanel.appendChild(localText);
+
+      previewWrap.appendChild(serverPanel);
+      previewWrap.appendChild(localPanel);
+
+      const manualActions = document.createElement("div");
+      manualActions.style.display = "flex";
+      manualActions.style.gap = "8px";
+      manualActions.style.margin = "6px 0";
+
+      const useServerBtn = document.createElement("button");
+      useServerBtn.textContent = "使用服务端内容";
+      useServerBtn.onclick = () => {
+        const draft = drafts.get(item.path);
+        if (!draft) {
+          return;
+        }
+        if (item.server_content === null) {
+          deleteBox.checked = true;
+          draft.delete = true;
+          manualText.disabled = true;
+          return;
+        }
+        deleteBox.checked = false;
+        draft.delete = false;
+        manualText.disabled = false;
+        draft.manualContent = item.server_content;
+        manualText.value = item.server_content;
+      };
+
+      const useLocalBtn = document.createElement("button");
+      useLocalBtn.textContent = "使用本地内容";
+      useLocalBtn.onclick = () => {
+        const draft = drafts.get(item.path);
+        if (!draft) {
+          return;
+        }
+        if (item.client_content === null) {
+          deleteBox.checked = true;
+          draft.delete = true;
+          manualText.disabled = true;
+          return;
+        }
+        deleteBox.checked = false;
+        draft.delete = false;
+        manualText.disabled = false;
+        draft.manualContent = item.client_content;
+        manualText.value = item.client_content;
+      };
+
+      manualActions.appendChild(useServerBtn);
+      manualActions.appendChild(useLocalBtn);
+
       if (!manualEditable) {
         const hint = document.createElement("div");
         hint.textContent = "该冲突涉及二进制内容，暂不支持手动编辑，请使用保留本地/服务端。";
         hint.style.opacity = "0.8";
         manualWrap.appendChild(hint);
       } else {
+        manualWrap.appendChild(previewWrap);
+        manualWrap.appendChild(manualActions);
         manualWrap.appendChild(deleteWrap);
         manualWrap.appendChild(manualText);
       }

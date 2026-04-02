@@ -947,6 +947,16 @@ var ObsidianSyncSettingTab = class extends import_obsidian.PluginSettingTab {
     const typeSummary = Object.entries(preview.summary.byType).map(([type, count]) => `${type}:${count}`).join(", ");
     summary.textContent = `\u51B2\u7A81\u96C6 ${preview.conflictSetId}\uFF0C\u5171 ${preview.summary.total} \u9879${typeSummary ? `\uFF08${typeSummary}\uFF09` : ""}`;
     container.appendChild(summary);
+    const toPreviewText = (value) => {
+      if (value === null) {
+        return "(\u8BE5\u4FA7\u7ED3\u679C\u4E3A\u5220\u9664\u6587\u4EF6)";
+      }
+      if (value.startsWith(BINARY_MARKER_PREFIX)) {
+        const size = value.slice(BINARY_MARKER_PREFIX.length).length;
+        return `[\u4E8C\u8FDB\u5236\u5185\u5BB9\uFF0Cbase64\u957F\u5EA6 ${size}]`;
+      }
+      return value;
+    };
     const list = document.createElement("div");
     const drafts = /* @__PURE__ */ new Map();
     for (const item of preview.items) {
@@ -1014,12 +1024,89 @@ var ObsidianSyncSettingTab = class extends import_obsidian.PluginSettingTab {
       };
       deleteWrap.appendChild(deleteBox);
       deleteWrap.append(" \u624B\u52A8\u89E3\u51B3\u4E3A\u5220\u9664\u8BE5\u6587\u4EF6");
+      const previewWrap = document.createElement("div");
+      previewWrap.style.display = "grid";
+      previewWrap.style.gridTemplateColumns = "1fr 1fr";
+      previewWrap.style.gap = "8px";
+      previewWrap.style.marginBottom = "8px";
+      const serverPanel = document.createElement("div");
+      const serverTitle = document.createElement("div");
+      serverTitle.textContent = "\u670D\u52A1\u7AEF\u5185\u5BB9";
+      serverTitle.style.fontWeight = "600";
+      const serverText = document.createElement("textarea");
+      serverText.readOnly = true;
+      serverText.rows = 6;
+      serverText.style.width = "100%";
+      serverText.style.fontFamily = "monospace";
+      serverText.value = toPreviewText(item.server_content);
+      serverPanel.appendChild(serverTitle);
+      serverPanel.appendChild(serverText);
+      const localPanel = document.createElement("div");
+      const localTitle = document.createElement("div");
+      localTitle.textContent = "\u672C\u5730\u5185\u5BB9";
+      localTitle.style.fontWeight = "600";
+      const localText = document.createElement("textarea");
+      localText.readOnly = true;
+      localText.rows = 6;
+      localText.style.width = "100%";
+      localText.style.fontFamily = "monospace";
+      localText.value = toPreviewText(item.client_content);
+      localPanel.appendChild(localTitle);
+      localPanel.appendChild(localText);
+      previewWrap.appendChild(serverPanel);
+      previewWrap.appendChild(localPanel);
+      const manualActions = document.createElement("div");
+      manualActions.style.display = "flex";
+      manualActions.style.gap = "8px";
+      manualActions.style.margin = "6px 0";
+      const useServerBtn = document.createElement("button");
+      useServerBtn.textContent = "\u4F7F\u7528\u670D\u52A1\u7AEF\u5185\u5BB9";
+      useServerBtn.onclick = () => {
+        const draft = drafts.get(item.path);
+        if (!draft) {
+          return;
+        }
+        if (item.server_content === null) {
+          deleteBox.checked = true;
+          draft.delete = true;
+          manualText.disabled = true;
+          return;
+        }
+        deleteBox.checked = false;
+        draft.delete = false;
+        manualText.disabled = false;
+        draft.manualContent = item.server_content;
+        manualText.value = item.server_content;
+      };
+      const useLocalBtn = document.createElement("button");
+      useLocalBtn.textContent = "\u4F7F\u7528\u672C\u5730\u5185\u5BB9";
+      useLocalBtn.onclick = () => {
+        const draft = drafts.get(item.path);
+        if (!draft) {
+          return;
+        }
+        if (item.client_content === null) {
+          deleteBox.checked = true;
+          draft.delete = true;
+          manualText.disabled = true;
+          return;
+        }
+        deleteBox.checked = false;
+        draft.delete = false;
+        manualText.disabled = false;
+        draft.manualContent = item.client_content;
+        manualText.value = item.client_content;
+      };
+      manualActions.appendChild(useServerBtn);
+      manualActions.appendChild(useLocalBtn);
       if (!manualEditable) {
         const hint = document.createElement("div");
         hint.textContent = "\u8BE5\u51B2\u7A81\u6D89\u53CA\u4E8C\u8FDB\u5236\u5185\u5BB9\uFF0C\u6682\u4E0D\u652F\u6301\u624B\u52A8\u7F16\u8F91\uFF0C\u8BF7\u4F7F\u7528\u4FDD\u7559\u672C\u5730/\u670D\u52A1\u7AEF\u3002";
         hint.style.opacity = "0.8";
         manualWrap.appendChild(hint);
       } else {
+        manualWrap.appendChild(previewWrap);
+        manualWrap.appendChild(manualActions);
         manualWrap.appendChild(deleteWrap);
         manualWrap.appendChild(manualText);
       }
